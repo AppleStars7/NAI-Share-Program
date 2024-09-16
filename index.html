@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NAI 이미지 생성기</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f4f4f4;">
+    <header style="background-color: #3498db; color: white; padding: 20px; border-radius: 5px; text-align: center; margin-bottom: 20px;">
+        <h1 style="margin: 0;">NAI 이미지 생성기</h1>
+    </header>
+    <main style="background-color: white; padding: 20px; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.1);">
+        <form id="generateForm" style="display: grid; gap: 15px;">
+            <div>
+                <label for="prompt" style="font-weight: bold;">프롬프트:</label><br>
+                <textarea id="prompt" name="prompt" rows="4" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"></textarea>
+            </div>
+            <div>
+                <label for="negative_prompt" style="font-weight: bold;">네거티브 프롬프트:</label><br>
+                <textarea id="negative_prompt" name="negative_prompt" rows="4" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"></textarea>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <div style="flex: 1;">
+                    <label for="width" style="font-weight: bold;">너비:</label>
+                    <input type="number" id="width" name="width" value="1024" min="64" style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
+                </div>
+                <div style="flex: 1;">
+                    <label for="height" style="font-weight: bold;">높이:</label>
+                    <input type="number" id="height" name="height" value="1024" min="64" style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
+                </div>
+            </div>
+            <div>
+                <label for="model" style="font-weight: bold;">모델:</label>
+                <select id="model" name="model" style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
+                    <option value="nai-diffusion-3">일반</option>
+                    <option value="nai-diffusion-furry-3">퍼리</option>
+                </select>
+            </div>
+            <input type="submit" value="이미지 생성" id="submitButton" style="background-color: #2ecc71; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px;">
+        </form>
+        <div id="result" style="margin-top: 20px; text-align: center;">
+            <p id="status" style="font-weight: bold;"></p>
+            <img id="generatedImage" src="" alt="생성된 이미지" style="display: none; max-width: 100%; height: auto; border-radius: 4px; box-shadow: 0 0 10px rgba(0,0,0,0.1);">
+            <br>
+            <button id="saveButton" style="display: none; background-color: #3498db; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; margin-top: 10px;">이미지 저장</button>
+        </div>
+    </main>
+
+    <script>
+        $(document).ready(function() {
+            let isProcessing = false;
+            let clientId = localStorage.getItem('clientId');
+            if (!clientId) {
+                clientId = 'client_' + Math.random().toString(36).substr(2, 9);
+                localStorage.setItem('clientId', clientId);
+            }
+
+            function validateImageSize(width, height) {
+                if (width < 64) width = 64;
+                if (height < 64) height = 64;
+                
+                if (width * height > 1048576) {
+                    return "이미지 크기가 너무 큽니다. 최대 허용 크기는 1048576 픽셀입니다.";
+                }
+                
+                return null;
+            }
+
+            $('#generateForm').submit(function(e) {
+                e.preventDefault();
+                if (isProcessing) {
+                    alert('현재 요청이 완료될 때까지 기다려주세요.');
+                    return;
+                }
+
+                var prompt = $('#prompt').val();
+                var negative_prompt = $('#negative_prompt').val();
+                var width = parseInt($('#width').val());
+                var height = parseInt($('#height').val());
+                var model = $('#model').val();
+
+                var errorMessage = validateImageSize(width, height);
+                if (errorMessage) {
+                    alert(errorMessage);
+                    return;
+                }
+
+                isProcessing = true;
+                $('#submitButton').prop('disabled', true);
+                $('#status').text('요청을 제출 중...');
+                $('#saveButton').hide();
+
+                $.ajax({
+                    url: 'http://아이피:5000/generate', //본인 아이피 입력
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({
+                        prompt: prompt,
+                        negative_prompt: negative_prompt,
+                        width: width,
+                        height: height,
+                        model: model,
+                        client_id: clientId
+                    }),
+                    success: function(data) {
+                        $('#status').text('작업이 대기열에 추가되었습니다. 처리를 기다리는 중...');
+                        checkStatus(data.task_id);
+                    },
+                    error: function(jqXHR) {
+                        if (jqXHR.status === 429) {
+                            alert('이미 활성화된 요청이 있습니다. 완료될 때까지 기다려주세요.');
+                        } else if (jqXHR.status === 400) {
+                            alert(jqXHR.responseJSON.error);
+                        } else {
+                            alert('작업 제출 중 오류가 발생했습니다');
+                        }
+                        isProcessing = false;
+                        $('#submitButton').prop('disabled', false);
+                    }
+                });
+            });
+
+            function checkStatus(taskId) {
+                $.ajax({
+                    url: 'http://아이피:5000/status/' + taskId, //본인 아이피 입력
+                    method: 'GET',
+                    data: { client_id: clientId },
+                    success: function(data) {
+                        $('#status').text('상태: ' + translateStatus(data.status));
+                        if (data.status === 'completed') {
+                            loadImage(taskId);
+                            isProcessing = false;
+                            $('#submitButton').prop('disabled', false);
+                            $('#saveButton').show();
+                        } else if (data.status === 'error') {
+                            $('#status').text('이미지 처리 중 오류가 발생했습니다.');
+                            isProcessing = false;
+                            $('#submitButton').prop('disabled', false);
+                        } else {
+                            setTimeout(function() { checkStatus(taskId); }, 3000);
+                        }
+                    },
+                    error: function() {
+                        $('#status').text('상태 확인 중 오류가 발생했습니다');
+                        isProcessing = false;
+                        $('#submitButton').prop('disabled', false);
+                    }
+                });
+            }
+
+            function translateStatus(status) {
+                switch(status) {
+                    case 'queued': return '대기 중';
+                    case 'processing': return '처리 중';
+                    case 'completed': return '완료됨';
+                    case 'error': return '오류';
+                    default: return status;
+                }
+            }
+
+            function loadImage(taskId) {
+                $('#generatedImage').attr('src', 'http://아이피:5000/image/' + taskId).show(); //본인 아이피 입력
+            }
+
+            $('#saveButton').click(function() {
+                var imgSrc = $('#generatedImage').attr('src');
+                var fileName = formatDate(new Date()) + '.png';
+
+                fetch(imgSrc)
+                    .then(response => response.blob())
+                    .then(blob => {
+                        var url = window.URL.createObjectURL(blob);
+                        var a = document.createElement('a');
+                        a.href = url;
+                        a.download = fileName;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                    })
+                    .catch(error => {
+                        console.error('Download failed:', error);
+                        alert('이미지 다운로드 중 오류가 발생했습니다.');
+                    });
+            });
+
+            function formatDate(date) {
+                var year = date.getFullYear();
+                var month = ('0' + (date.getMonth() + 1)).slice(-2);
+                var day = ('0' + date.getDate()).slice(-2);
+                var hours = ('0' + date.getHours()).slice(-2);
+                var minutes = ('0' + date.getMinutes()).slice(-2);
+                var seconds = ('0' + date.getSeconds()).slice(-2);
+
+                return year + month + day + '_' + hours + minutes + seconds;
+            }
+        });
+    </script>
+</body>
+</html>
